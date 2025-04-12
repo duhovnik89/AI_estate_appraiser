@@ -1,0 +1,273 @@
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+import os, sys, math
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, r2_score, mean_absolute_error
+from sklearn.linear_model import LogisticRegression
+
+# Посмотрим, что внутри датасета
+df = pd.read_csv('avito_kvartiry_severomorsk_cut.csv', )
+print(df.shape)
+df.head(10)
+
+#df.columns
+
+
+# Оставляем  только нужные нам колонки:
+df_ka = df[['Цена', 'Широта', 'Долгота', 'Количество комнат', 'Общая площадь, число', 'Площадь кухни, число', 'Тип комнат', 'Санузел', 'Ремонт', 'Тип дома', 'Высота потолков', 'Год постройки', 'Мебель', 'Техника']]
+#'Описание', 'Район', 'Адрес', 'Подкатегория',
+#'Статус', 'Жилая площадь, число', 'Этаж', 'Балкон или лоджия', 'Окна', 'Этажей в доме', 'Пассажирский лифт', 'В доме', 'Парковка', 'Дополнительно', 'Тёплый пол'
+df_ka.describe(include='object')
+
+
+
+from dataclasses import replace
+# ======= Кодирование вручную =======
+# Прежде всего, приведем данные к числовому типу.
+
+# Количество комнат: все цифрами, кроме студии, для студии ставим 0
+def get_digit_rooms_qnt(rooms_qnt):
+    try:
+        return int(rooms_qnt)
+    except ValueError:
+        return 0
+
+df_ka['rooms_qnt_num'] = df_ka['Количество комнат'].apply(get_digit_rooms_qnt)
+df_ka.drop(['Количество комнат'], axis=1, inplace=True)
+
+# Тип комнат: 'Смежные' = 0; 'Изолированные, Смежные' = 1, 'Изолированные' = 2
+def get_digit_room_type(room_type):
+    corr_dict = {'Смежные': 0, 'Изолированные, Смежные': 1, 'Изолированные': 2}
+    try:
+        return corr_dict[room_type]
+    except:
+        return 0
+
+df_ka['room_type_num'] = df_ka['Тип комнат'].apply(get_digit_room_type)
+df_ka.drop(['Тип комнат'], axis=1, inplace=True)
+
+# Санузел: 'Совмещённый' = 0, 'Раздельный' = 1
+def get_digit_bathroom(bathroom):
+    corr_dict = {'Совмещённый': 0, 'Раздельный': 1}
+    try:
+        return corr_dict[bathroom]
+    except:
+        return 0
+
+df_ka['bathroom_num'] = df_ka['Санузел'].apply(get_digit_bathroom)
+df_ka.drop(['Санузел'], axis=1, inplace=True)
+
+# Ремонт: 'Требуется' = 0, 'Косметический' = 1, 'Евро' = 2, 'Дизайнерский' = 3
+def get_digit_renovation(renovation):
+    corr_dict = {'Требуется': 0, 'Косметический': 1, 'Евро': 2, 'Дизайнерский': 3}
+    try:
+        return corr_dict[renovation]
+    except:
+        return 0
+
+df_ka['renovation_num'] = df_ka['Ремонт'].apply(get_digit_renovation)
+df_ka.drop(['Ремонт'], axis=1, inplace=True)
+
+# Тип дома: 'Панельный' = 0; 'Кирпичный' = 1, 'Монолитный' = 2
+def get_digit_house_type(house_type):
+    corr_dict = {'Панельный': 0, 'Кирпичный': 1, 'Монолитный': 2}
+    try:
+        return corr_dict[house_type]
+    except:
+        return 0
+
+df_ka['house_type_num'] = df_ka['Тип дома'].apply(get_digit_house_type)
+df_ka.drop(['Тип дома'], axis=1, inplace=True)
+
+
+# Высота потолков: убираем буквы и приводим к числу с плавающей точкой
+def get_float_ceiling_height(ceiling_height):
+    mean = 2.6
+    try:
+        float(ceiling_height)
+        return ceiling_height
+    except ValueError:
+        mean
+    h = ceiling_height.replace("м", "").strip()
+    try:
+        return pd.to_numeric(ceiling_height)
+    except:
+        return ceiling_height
+
+# Колонка Высота потолков имеет ошибочые данные, преобразование не работает нормально, удаляем
+#df_ka['ceiling_height_num'] = df_ka['Высота потолков'].apply(get_float_ceiling_height)
+df_ka.drop(['Высота потолков'], axis=1, inplace=True)
+
+def replace_zpt_to_dot(sqr):
+    if type(sqr) == float:
+        return sqr
+    else:
+        return sqr.replace(',', '.')
+
+# Приводим площади к дробному числу
+df_ka['Общая площадь, число'] = df_ka['Общая площадь, число'].apply(replace_zpt_to_dot)
+df_ka['Общая площадь, число'] = pd.to_numeric(df_ka['Общая площадь, число'], errors='coerce') # Пытаемся преобразовать в число, в случае ошибки принуждаем (coerce) к NaN
+df_ka['Общая площадь, число'] = df_ka['Общая площадь, число'].replace(np.nan, 0) # Заменяем NaN на 0
+
+df_ka['Площадь кухни, число'] = df_ka['Площадь кухни, число'].apply(replace_zpt_to_dot)
+df_ka['Площадь кухни, число'] = pd.to_numeric(df_ka['Площадь кухни, число'], errors='coerce') # Пытаемся преобразовать в число, в случае ошибки принуждаем (coerce) к NaN
+df_ka['Площадь кухни, число'] = df_ka['Площадь кухни, число'].replace(np.nan, 0) # Заменяем NaN на 0
+
+df_ka['Год постройки'] = pd.to_numeric(df_ka['Год постройки'], errors='coerce') # Пытаемся преобразовать в число, в случае ошибки принуждаем (coerce) к NaN
+df_ka['Год постройки'] = df_ka['Год постройки'].replace(np.nan, 1960.0) # Заменяем NaN на среднее значение
+df_ka['Год постройки'] = df_ka['Год постройки'].replace(0.0, 1960.0) # Заменяем 0 на среднее значение
+
+def get_digit_len(s):
+    try:
+        return len(s)
+    except:
+        return 0
+
+#Из описаний мебели и техники берем количество символов
+df_ka['furniture_num'] = df_ka['Мебель'].apply(get_digit_len)
+df_ka.drop(['Мебель'], axis=1, inplace=True)
+
+df_ka['tech_num'] = df_ka['Техника'].apply(get_digit_len)
+df_ka.drop(['Техника'], axis=1, inplace=True)
+
+
+# получаем признаки и метки
+#all_features = df_ka.loc[:, df_ka.columns != 'Цена'].values[:, 1:] # признаки это все числовые параметры
+all_features = df_ka.loc[:, df_ka.columns != 'Цена']
+out_come = df_ka.loc[:, 'Цена'].values # метки это цены
+
+## Масштабируем все данные в диапазон -1 : 1
+scaler = MinMaxScaler((-1, 1))
+x = scaler.fit_transform(all_features.values)
+y = pd.Series(out_come)
+
+
+# Делим датасет на тестовый и обучающий наборы
+x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=42)
+
+
+# Регрессия по методу опорных векторов (Support Vector Regression)
+from sklearn.svm import SVR
+from sklearn.svm import LinearSVR
+
+sk_svr = SVR(C=0.8, epsilon=0.1)
+sk_svr.fit(x_train, y_train)
+sk_svr_pred_res = sk_svr.predict(x_test)
+#sk_svr_r2 = r2_score(y_test, sk_svr_pred_res)
+sk_svr_mae = mean_absolute_error(y_test, sk_svr_pred_res)
+
+print(f'sk SVR mae score: {sk_svr_mae:}')
+
+# Оставляю LinearSVR - работает гораздо лучше
+sk_linear_svr = LinearSVR(loss='squared_epsilon_insensitive')
+sk_linear_svr.fit(x_train, y_train)
+sk_linear_svr_pred_res = sk_linear_svr.predict(x_test)
+#sk_linear_svr_r2 = r2_score(y_test, sk_linear_svr_pred_res)
+sk_linear_svr_mae = mean_absolute_error(y_test, sk_linear_svr_pred_res)
+
+print(f'sk LinearSVR mae score: {sk_linear_svr_mae:}')
+
+# Чтобы уменьшить отклонение, также можно при обучении ответы нормализовать
+# И потом померить mae и преобразовать обратно
+
+
+# XGBoost регрессия
+import xgboost as xgb
+
+# Цель "reg:squarederror"в XGBoost используется для задач регрессии, когда целевая переменная непрерывна. Она минимизирует квадратичную ошибку между предсказанными и фактическими значениями, что делает ее обычным выбором для задач регрессии из-за ее простоты и интерпретируемости.
+xgb_reg_model = xgb.XGBRegressor(max_depth=3, learning_rate=0.18, objective='reg:squarederror')
+xgb_reg_model = xgb_reg_model.fit(x_train, y_train)
+
+
+# Метод случайного леса
+from sklearn.ensemble import RandomForestRegressor
+random_forest = RandomForestRegressor(n_estimators=50, max_depth=16)
+# обучение
+random_forest.fit(x_train, y_train)
+
+
+# Выводим результаты производительности
+print ('Точность методов на тренировочных и тестовых данных:')
+print('')
+print('Точность метода опорных векторов (LinearSVM) для регрессии на обучающей выборке: {:.2f}'.format(sk_linear_svr.score(x_train, y_train)*100))
+print('Точность метода опорных векторов (LinearSVM) на тестовой выборке : {:.2f}'.format(sk_linear_svr.score(x_test, y_test)*100))
+print('')
+print('Точность метода XGBoost на обучающей выборке: {:.2f}'.format(xgb_reg_model.score(x_train, y_train)*100))
+print('Точность метода XGBoost на тестовой выборке: {:.2f}'.format(xgb_reg_model.score(x_test, y_test)*100))
+print('')
+print('Точность метода случайный лес (Random Forest) на обучающей выборке: {:.2f}'.format(random_forest.score(x_train, y_train)*100))
+print('Точность метода случайный лес (Random Forest) на тестовой выборке: {:.2f}'.format(random_forest.score(x_test, y_test)*100))
+
+
+
+# Делаем интерфейс модели для пользователя.
+# Используем модель на XGBoost, как самую точную на тестовой выборке.
+# Указывать колонки нужно в той же последовательности: Широта, Долгота,	Общая площадь, число, Площадь кухни, число,	Год постройки, rooms_qnt_num, room_type_num, bathroom_num, renovation_num, house_type_num, furniture_num, tech_num
+flat_features = []
+
+# Широту и долготу берем средние, чтобы не заставлять пользователя их узнавать
+#flat_features.append(69.069476)
+#flat_features.append(33.415034)
+lat = float(input("Укажите географическую широту района \n"))
+flat_features.append(lat)
+
+lon = float(input("Укажите географическую долготу района \n"))
+flat_features.append(lon)
+
+commom_square = float(input("Укажите общую площадь квариры. Разделитель дробной части - точка \n"))
+flat_features.append(commom_square)
+
+kitchen_square = float(input("Укажите площадь кухни. Разделитель дробной части - точка \n"))
+flat_features.append(kitchen_square)
+
+built_year = float(input("Укажите год постройки жилого дома \n"))
+flat_features.append(built_year)
+
+rooms_qnt_num = float(input("Укажите количество комнат целым числом. 0 - студия \n"))
+flat_features.append(rooms_qnt_num)
+
+room_type_num = float(input("Укажите тип комнат числом: 'Смежные' = 0; 'Изолированные,Смежные' = 1, 'Изолированные' = 2 \n"))
+flat_features.append(room_type_num)
+
+bathroom_num = float(input("Укажите тип санузла числом: 'Совмещённый' = 0, 'Раздельный' = 1 \n"))
+flat_features.append(bathroom_num)
+
+renovation_num = float(input("Укажите, какой в квартире ремонт: 'Требуется' = 0, 'Косметический' = 1, 'Евро' = 2, 'Дизайнерский' = 3 \n"))
+flat_features.append(renovation_num)
+
+house_type_num = float(input("Укажите тип дома: 'Панельный' = 0; 'Кирпичный' = 1, 'Монолитный' = 2 \n"))
+flat_features.append(house_type_num)
+
+furniture_num = input("Перечислите необходимую мебель через запятую \n")
+flat_features.append(furniture_num)
+
+tech_num = input("Перечислите необходимую технику через запятую \n")
+flat_features.append(tech_num)
+
+flat_features[10] = float(len(flat_features[10]))
+flat_features[11] = float(len(flat_features[11]))
+
+#print(flat_features)
+
+
+
+# ======= Получаем ответ модели (для кодирования вручную) =======
+# Прибавляем к исходному датасету введенные пользователем данные, как еще одну строку, чтобы корректно отработало масштабирование введенной пользователем строки
+all_features.loc[len(all_features)] = flat_features
+# Масштабируем введенные данные в диапазон -1 : 1
+user_x = scaler.fit_transform(all_features.values)
+user_x_df = pd.DataFrame(user_x)
+user_x = np.array(user_x_df.loc[len(user_x_df)-1])
+
+print("Расчетная цена квартиры по вашим параметрам:")
+sk_linear_svr_pred_res = sk_linear_svr.predict([user_x])
+print("Метод опорных векторов (LinearSVR):", ("%.2f" % sk_linear_svr_pred_res[0]))
+xgb_reg_pred_res = xgb_reg_model.predict([user_x])
+print("Градиентный бустинг (XGBRegressor)", ("%.2f" % xgb_reg_pred_res[0]))
+random_forest_pred_res = random_forest.predict([user_x])
+print("Метод случайного леса (RandomForestRegressor)", ("%.2f" % random_forest_pred_res[0]))
+mean_estimate = (sk_linear_svr_pred_res[0] + xgb_reg_pred_res[0] + random_forest_pred_res[0]) / 3
+print("Итоговая средняя оценка =", ("%.2f" % mean_estimate))
